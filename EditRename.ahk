@@ -3,11 +3,16 @@
 
 iniPath := A_ScriptDir "\set.ini"
 
+SplitPath(A_ScriptFullPath, , , , &app)
+
 if !FileExist(iniPath)
 {
     FileAppend("
     (
-        ; 不要调整行顺序,不要删除行,可以编辑文件夹,只传入一个文件无效
+        ; 不要调整行顺序,不要删除行, 可以更改程序文件名,只传入一个文件无效
+        ; 关闭编辑器时会自动进行修改
+        ; 修改错误时右键托盘图标Exit退出
+
         ; 拖拽文件到程序或关联发送到菜单后运行 这种方法有文件数量限制
         ; 将所有文件路径保存至 %temp% 目录下的指定文件,然后将此文件作为唯一参数传入
         ; 直接运行程序,然后拖拽文件至界面上
@@ -15,31 +20,33 @@ if !FileExist(iniPath)
         ; 此三种方法没有文件数量限制
 
         ; editor 编辑器路径,需编辑器能在标题显示文件名
-        ; sendto 关联右键发送到菜单,需无参运行程序打开设置进行关联
+        ; filename 是否只修改文件名
+        ; formatName 是否对文件名进行处理 移除首尾空格,多个空格替换为单个,替换非法字符为空
+        ; logSave 是否记录log 用于恢复原始名称 路径为 程序所在目录\logtxt
+        ; 如需全部恢复,拖拽 logtxt 至 restore.exe上, 部分恢复复制要恢复的所有行到新建文本文档(UTF-8),然后将其拖至 restore.exe上
         ; tipCount 结束后提示修改的项目数
-        ; logSave 是否记录log
-        ; logPath log保存位置,为空则为 程序所在目录\log.txt
+        ; sendto 关联右键发送到菜单,需无参运行程序打开设置进行关联
         ; cp 指定编码,其他程序传入临时文件不能识别编码时设置,如需指定编码,请设置数字标识符
         ; 数字标识符参考 https://learn.microsoft.com/zh-cn/windows/win32/intl/code-page-identifiers
         ; 1为启用,0为禁用
 
     )", iniPath, "UTF-16")
     IniWrite("D:\OneDrive\Program\Notepad++\notepad++.exe", iniPath, "set", "editor")
+    IniWrite(1, iniPath, "set", "filename")
+    IniWrite(1, iniPath, "set", "formatName")
     IniWrite(0, iniPath, "set", "sendto")
     IniWrite(1, iniPath, "set", "tipCount")
     IniWrite(1, iniPath, "set", "logSave")
-    IniWrite("", iniPath, "set", "logPath")
     IniWrite("", iniPath, "set", "cp")
 }
 
 editor := IniRead(iniPath, "set", "editor", "")
 cp := IniRead(iniPath, "set", "cp", "")
-tipCount := IniRead(iniPath, "set", "tipCount", 1)
-log.logSave := IniRead(iniPath, "set", "logSave", 1)
-log.logPath := IniRead(iniPath, "set", "logPath", "")
+filename := IniRead(iniPath, "set", "filename", 0)
+formatName := IniRead(iniPath, "set", "formatName", 0)
+tipCount := IniRead(iniPath, "set", "tipCount", 0)
+log.logSave := IniRead(iniPath, "set", "logSave", 0)
 
-if (!log.logPath)
-    log.logPath := A_ScriptDir "\log.txt"
 if cp
     cp := "CP" cp
 
@@ -50,15 +57,22 @@ g := { temp: "" }
 
 if A_Args.Length = 1
 {
+    ar := []
     if (InStr(A_Args[1], A_Temp))
     {
-        g.temp := A_Args[1]
-        loop parse FileRead(g.temp, cp), "`n", "`r"
-            arr.Push(A_LoopField)
+        loop parse FileRead(A_Args[1], cp), "`n", "`r"
+            ar.Push(A_LoopField)
+
+        if filename
+            FilesProcess(ar)
+        else
+        {
+            arr := ar
+            g.temp := A_Args[1]
+        }
     }
     else if StrLower(A_Args[1]) = "clip"
     {
-        ar := []
         loop parse A_Clipboard, "`n", "`r"
             ar.Push(A_LoopField)
         FilesProcess(ar)
@@ -70,7 +84,7 @@ else
 {
     mygui := Gui()
     mygui.Opt("+AlwaysOnTop +ToolWindow")
-    mygui.Title := "编辑重命名"
+    mygui.Title := app
     mygui.Add("Text", , "拖拽文件至此进行重命名")
     mygui.Add("Button", , "编辑ini").OnEvent("Click", Set)
     mygui.Show("w150 h70")
@@ -83,7 +97,7 @@ else
     Set(*)
     {
         RunWait(iniPath)
-        sendToLnk := A_StartMenu "/../SendTo/编码重命名.lnk"
+        sendToLnk := A_StartMenu "/../SendTo/" app ".lnk"
 
         if IniRead(iniPath, "set", "sendto", 0)
             CreateLnk(sendToLnk)
@@ -149,20 +163,26 @@ if FileGetTime(g.temp) != time
         if !FileExist(souce)
             continue
 
-        SplitPath(out, , &dir, &ext, &name)
-
-        if !DirExist(dir)
+        if filename
         {
-            try
-                DirCreate(dir)
-            catch
-            {
-                log.Push(souce, out, "目标文件夹错误")
-                continue
-            }
+            SplitPath(souce, , &dir)
+            out := dir "\" batchReplace(out)
         }
-
-        out := dir "\" batchReplace(name) "." ext
+        else
+        {
+            SplitPath(out, , &dir, &ext, &name)
+            if !DirExist(dir)
+            {
+                try
+                    DirCreate(dir)
+                catch
+                {
+                    log.Push(souce, out, "目标文件夹错误")
+                    continue
+                }
+            }
+            out := dir "\" batchReplace(name) "." ext
+        }
 
         if out == souce
             continue
@@ -189,11 +209,14 @@ if FileGetTime(g.temp) != time
 
 batchReplace(str)
 {
+    if !formatName
+        return str
+
     str := RenameSafe(str)
     str := Trim(str)
     str := StrReplace(str, "  ", " ")
-    str := StrReplace(str, "@@", "@")
-    str := StrReplace(str, "##", "#")
+    ; str := StrReplace(str, "@@", "@")
+    ; str := StrReplace(str, "##", "#")
     return str
 }
 
@@ -206,7 +229,8 @@ ExitFunc(*)
 
     if tipCount && count
     {
-        TrayTip("已处理 " count " 项", "重命名")
+        ; TrayTip("已处理 " count " 项", app)
+        ToolTip(app ": 已处理 " count " 项")
         Sleep(2000)
     }
 }
@@ -230,7 +254,6 @@ class log
         s := ""
         for i in this.list
             s .= i[1] "<-->" i[2] "<-->" i[3] "`n"
-        s := RTrim(s, "`n")
         FileAppend(s, this.logPath, "UTF-8")
     }
 }
@@ -243,6 +266,16 @@ FilesProcess(list)
         if (FileExist(i))
             loop files i, "DF"
                 arr.Push(A_LoopFileFullPath), files .= A_LoopFileFullPath "`n"
+
+    if filename
+    {
+        files := ""
+        for i in arr
+        {
+            SplitPath(i, &name)
+            files .= name "`n"
+        }
+    }
     files := RTrim(files, "`n")
 
     guid := Trim(CreateGUID(), "{}")
