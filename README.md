@@ -35,3 +35,8 @@
 
 ### 截图
 ![gif](gif.gif)
+
+### 下载链接 :
+[百度云](https://pan.baidu.com/s/1NY4ov9B7eLPH1ogTn7OoVg?pwd=su4z)
+
+[Github]( https://github.com/vvyoko/EditRename/releases/latest)
