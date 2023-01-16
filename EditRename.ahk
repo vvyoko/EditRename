@@ -1,4 +1,6 @@
-﻿#SingleInstance force
+﻿;@Ahk2Exe-SetMainIcon     ico.ico
+
+#SingleInstance force
 FileEncoding("UTF-8")
 ; #NoTrayIcon
 
@@ -100,7 +102,9 @@ class ini
 
     static map := {
         editor: ["", "set"],
+        secondEditor: ["", "set"],
         gui: [0, "set"],
+        muiltTab: [0, "set"],
         filename: [0, "set"],
         formatName: [0, "set"],
         tipCount: [0, "set"],
@@ -116,7 +120,7 @@ class ini
         if !FileExist(this.path)
             this.Create()
 
-        for i in this.map
+        for i in this.map.OwnProps()
             this.%i% := this.Get(i)
 
         if !this.editor || !FileExist(this.editor)
@@ -155,20 +159,24 @@ class ini
             ; 此三种方法没有文件数量限制
 
             ; editor 编辑器路径,需编辑器能在标题显示文件名
+            ; secondEditor 备用编辑器,当此编辑器在运行时切换至此编辑器,用于启动较慢的备用编辑器,比方vscode...
             ; gui 是否在修改时显示界面,用于修改路径及恢复及退出
+            ; muiltTab 多标签编辑器切换标签立即进行重命名
             ; filename 修改文件名类型
             ; formatName 是否对文件名进行处理 移除首尾空格,替换非法字符为空
             ; logSave 是否记录log 用于恢复原始名称,部分恢复保留需要恢复的行,其余删除然后关闭
             ; tipCount 结束后提示修改的项目数
             ; cp 指定编码,其他程序传入临时文件不能识别编码时设置,如需指定编码,请设置数字标识符 参考 https://learn.microsoft.com/zh-cn/windows/win32/intl/code-page-identifiers
-            ; reArr为自定义替换,添加请按序号递增  ;搜索项;替换项;是否正则
+            ; reArr 为自定义替换,添加请按序号递增  ;搜索项;替换项;是否正则
             ; 1为启用,0为禁用
 
         )", this.path, "UTF-16")
 
 
         this.setWrite("", "editor")
+        this.setWrite("", "secondEditor")
         this.setWrite(1, "gui")
+        this.setWrite(0, "muiltTab")
         this.setWrite(1, "filename")
         this.setWrite(1, "formatName")
         this.setWrite(1, "tipCount")
@@ -308,6 +316,7 @@ class myG
 {
     static temp := ""
     static arr := []
+    static blankLine := 0
     static restore := 0
     static gui := ""
 
@@ -366,7 +375,6 @@ class myG
             ini.filename := t
             ini.setWrite(t, "filename")
 
-
             if !FileExist(this.temp) || !this.arr.Length
                 return
 
@@ -376,10 +384,7 @@ class myG
                     files .= i "`n"
             files := FilenameType(this.arr, files)
 
-            ;补全少的行
-            loop parse files, "`n"
-                index := A_Index
-            loop this.arr.Length - index
+            loop this.blankLine
                 files .= "`n"
 
             f := FileOpen(this.temp, "w")
@@ -459,17 +464,37 @@ BeginRename(list, notfull := true, tmep := "", cp := "")
 
     myG.temp := tmep
     myG.arr := arr
+    ;空白的行用于填充
+    myG.blankLine := 0
+    loop
+    {
+        if !myG.arr[myG.arr.Length - A_Index + 1]
+            myG.blankLine ++
+        else
+            break
+    }
     if myG.gui
         myG.gui.Title := arr.Length " - " app
 
     time := FileGetTime(tmep)
     SplitPath(tmep, &title, &runDir)
-    Run(ini.editor ' "' tmep '"', runDir)
+    editor := ini.editor
+    if ini.secondEditor && FileExist(ini.secondEditor)
+    {
+        SplitPath(ini.secondEditor, &editorName)
+        if editorName && WinExist("ahk_exe " editorName)
+            editor := ini.secondEditor
+    }
+
+    Run(editor ' "' tmep '"', runDir)
     count := 0
 
     if hwnd := WinWait(title, , 5)
     {
-        WinWaitClose(hwnd)
+        if ini.muiltTab
+            WinWaitNotActive(title)
+        else
+            WinWaitClose(hwnd)
 
         if FileGetTime(tmep) != time || ini.formatName
         {
@@ -564,11 +589,9 @@ BeginRename(list, notfull := true, tmep := "", cp := "")
 
     batchReplace(str)
     {
-        if !ini.formatName
-            return str
+        if ini.formatName
+            str := Trim(RenameSafe(str))
 
-        str := RenameSafe(str)
-        str := Trim(str)
         for i in ini.reArr
             if Type(i) == "Array"
                 str := (i[3] ? RegExReplace : StrReplace)(str, i[1], i[2])
