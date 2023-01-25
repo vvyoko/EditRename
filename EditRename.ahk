@@ -1,27 +1,21 @@
 ﻿;@Ahk2Exe-SetMainIcon     ico.ico
-
 #SingleInstance force
 FileEncoding("UTF-8")
-; #NoTrayIcon
-
 
 SplitPath(A_ScriptFullPath, , , , &app)
+g := { gui: "" }
 
 ini.Init()
-TrayMenu
-tmpArr := []
+TrayMenu()
 
 if A_Args.Length = 1
 {
+    tmpArr := []
     if (InStr(A_Args[1], A_Temp))
     {
-        loop parse FileRead(A_Args[1], ini.cp), "`n", "`r"
+        loop parse FileRead(A_Args[1]), "`n", "`r"
             tmpArr.Push(A_LoopField)
-
-        if ini.filename
-            BeginRename(tmpArr, , , ini.cp)
-        else
-            BeginRename(tmpArr, ini.filename, A_Args[1])
+        BeginRename(tmpArr)
     }
     else if StrLower(A_Args[1]) = "clip"
     {
@@ -29,11 +23,13 @@ if A_Args.Length = 1
             tmpArr.Push(A_LoopField)
         BeginRename(tmpArr)
     }
+    else if FileExist(A_Args[1])
+        BeginRename(A_Args)
 }
 else if A_Args.Length
     BeginRename(A_Args)
 else
-    myG.OpenGui()
+    OpenGui()
 
 class ini
 {
@@ -57,8 +53,6 @@ class ini
         IniWrite(value, this.path, sectionSave, key)
     }
 
-    static Delete(section, key) => IniDelete(this.path, section, key)
-
     static ReadLoop(Section, arr)
     {
         loop
@@ -67,52 +61,20 @@ class ini
                 break
             arr.Push(var)
         }
-
-        loop
-        {
-            if arr.Length < A_Index
-                break
-
-            var := arr[A_Index]
-            temp := []
-            for i in arr
-                if var = i
-                    temp.Push(A_Index)
-
-            temp.RemoveAt(1)
-            loop temp.Length
-                arr.RemoveAt(temp[temp.Length - A_Index + 1])
-        }
-    }
-
-    static WriteLoop(Section, arr)
-    {
-        loop
-        {
-            if (var := this.Read(arr.Length + A_Index, , Section))
-                this.Delete(Section, arr.Length + A_Index)
-            else
-                break
-        }
-
-        for i in arr
-            if this.Read(arr.Length + A_Index, , Section) != i
-                this.Write(i, A_Index, Section)
     }
 
     static map := {
+        gui: [0, "user"],
+        muiltTab: [0, "user"],
+        logError: [0, "user"],
         editor: ["", "set"],
         secondEditor: ["", "set"],
-        gui: [0, "set"],
-        muiltTab: [0, "set"],
-        filename: [0, "set"],
-        formatName: [0, "set"],
-        tipCount: [0, "set"],
-        logSave: [0, "set"],
-        sendto: [0, "set"],
-        cp: ["", "set"],
-        guiX: [0, "tmp"],
-        guiY: [0, "tmp"],
+        pathType: [0, "set"],
+        subFolder: [0, "set"],
+        subLevel: [0, "set"],
+        filter: ["", "set"],
+        guiX: [0, "set"],
+        guiY: [0, "set"],
     }
 
     static Init()
@@ -123,7 +85,7 @@ class ini
         for i in this.map.OwnProps()
             this.%i% := this.Get(i)
 
-        if !this.editor || !FileExist(this.editor)
+        if !FileExist(this.editor)
         {
             MsgBox("未设置编辑器,请设置", app)
             this.editor := FileSelect("1", , app " 请选择要使用的编辑器", "*.exe")
@@ -132,8 +94,17 @@ class ini
             else
                 ExitApp(1)
         }
-        if this.cp
-            this.cp := "CP" this.cp
+
+        if !IsNumber(this.subLevel)
+            this.subLevel := 0
+
+        this.filterArr := []
+        if this.filter
+        {
+            for i in StrSplit(this.filter)
+                if InStr("RASHNDOCTL", i)
+                    this.filterArr.Push(i)
+        }
 
         this.reArr := []
         this.ReadLoop("reArr", this.reArr)
@@ -143,136 +114,145 @@ class ini
             if _r.Length == 4
                 this.reArr[A_Index] := [_r[2], _r[3], _r[4]]
         }
+
+        loop this.reArr.Length
+        {
+            index := this.reArr.Length + 1 - A_Index
+            if index && Type(this.reArr[index]) != "Array"
+                this.reArr.RemoveAt(index)
+        }
     }
 
     static Create()
     {
         FileAppend("
         (
-            ; 不要调整行顺序,不要删除行, 可以更改程序文件名,只传入一个文件无效
-            ; 关闭编辑器时会自动进行重命名,显示界面时点击关闭手动退出
+            ; 其他说明请查看 https://github.com/vvyoko/EditRename
+            ; ini编辑完会在下一次运行时生效
+            ; 不要调整行顺序,不要删除行,尽量在一项操作完成再进行后继续操作
+            ; 关闭编辑器时会自动进行重命名
+            ; 修改错误时右键托盘图标退出或直接关闭界面
 
-            ; 拖拽文件到程序图标 这种方法有文件数量限制
-            ; 将所有文件路径保存至 %temp% 目录下的指定文件,然后将此文件作为唯一参数传入
-            ; 直接运行程序,然后拖拽文件至界面上
-            ; 将路径复制到剪贴板,然后将 clip 作为唯一参数传入
-            ; 此三种方法没有文件数量限制
-
-            ; editor 编辑器路径,需编辑器能在标题显示文件名
-            ; secondEditor 备用编辑器,当此编辑器在运行时切换至此编辑器,用于启动较慢的备用编辑器,比方vscode...
-            ; gui 是否在修改时显示界面,用于修改路径及恢复及退出
+            ; gui 在修改时显示界面 (为0时直接运行程序或者托盘启动界面)
             ; muiltTab 多标签编辑器切换标签立即进行重命名
-            ; filename 修改文件名类型
-            ; formatName 是否对文件名进行处理 移除首尾空格,替换非法字符为空
-            ; logSave 是否记录log 用于恢复原始名称,部分恢复保留需要恢复的行,其余删除然后关闭
-            ; tipCount 结束后提示修改的项目数
-            ; cp 指定编码,其他程序传入临时文件不能识别编码时设置,如需指定编码,请设置数字标识符 参考 https://learn.microsoft.com/zh-cn/windows/win32/intl/code-page-identifiers
-            ; reArr 为自定义替换,添加请按序号递增  ;搜索项;替换项;是否正则
+            ; logError 记录失败日志,保存于 程序目录\logError.txt
             ; 1为启用,0为禁用
+
+            ; reArr 自定义替换 (规则  ;搜索项;替换项;是否正则)
+            ;       自带2个示例为未启用状态
+            ;       如需启用请删除每项前面的 说明加; ,如 ;替换多个空白为空
+            ;       增加需要递增序号,如 3=;%{2,};%;1
+            ;       在启用时加载大量文件未修改关闭编辑器可能会影响速度
+            ;       影响不大,可关闭界面或托盘菜单直接退出
 
         )", this.path, "UTF-16")
 
+        this.setWrite(1, "gui")
+        this.setWrite(0, "muiltTab")
+        this.setWrite(0, "logError")
+
+        this.Write(";替换多个空白为空;\s{2,}`; `;1", 1, "reArr")
+        this.Write(";替换多个@为单个;@{2,}`;@`;1", 2, "reArr")
 
         this.setWrite("", "editor")
         this.setWrite("", "secondEditor")
-        this.setWrite(1, "gui")
-        this.setWrite(0, "muiltTab")
-        this.setWrite(1, "filename")
-        this.setWrite(1, "formatName")
-        this.setWrite(1, "tipCount")
-        this.setWrite(1, "logSave")
-        this.setWrite("", "cp")
-
-        this.Write(";\s{2,}`; `;1", 1, "reArr")
-        ; this.Write(";@{2,}`;@`;1", 2, "reArr")
-        ; this.Write(";#{2,}`;#`;1", 3, "reArr")
+        this.setWrite(1, "pathType")
+        this.setWrite(0, "subFolder")
+        this.setWrite(1, "subLevel")
+        this.setWrite("", "filter")
     }
 }
 
 class log
 {
     static list := []
-
-    static lastLog := A_ScriptDir "\lastLog.txt"
+    static listError := []
+    static logLast := A_ScriptDir "\logLast.txt"
     static log := A_ScriptDir "\log.txt"
+    static logError := A_ScriptDir "\logError.txt"
+    static restoreType := 0
 
-    static Push(old, new := "", op := "移动")
+    static Push(old, new, error := true)
     {
-        if ini.logSave
-            this.list.Push([old, new, op])
+        if !error
+            this.list.Push([old, new])
+        else if ini.logError
+            this.listError.Push([old, new])
     }
 
     static Save()
     {
-        s := ""
-        for i in this.list
-            s .= i[1] "<-->" i[2] "<-->" i[3] "`n"
-        FileAppend(s, this.log)
+        if this.list.Length
+        {
+            s := ""
+            for i in this.list
+                s .= i[1] "<-->" i[2] "`n"
+            FileAppend(s, this.log)
+            FileWrite(s, this.logLast)
+            this.list := []
+        }
 
-        try
-            FileDelete(this.lastLog)
-        FileAppend(s, this.lastLog)
-        this.list := []
+        if this.listError.Length
+        {
+            s := ""
+            for i in this.listError
+                s .= i[1] "<-->" i[2] "`n"
+            FileWrite(s, this.logError)
+            this.listError := []
+        }
     }
 
     static Restore(t)
     {
-        p := t == 1 ? this.lastLog : this.log
+        this.restoreType := t
+        p := t == 1 ? this.logLast : this.log
         sucsess := 0
         failure := 0
         rArr := []
         files := ""
 
         if !FileExist(p)
-            return
+            return ToolTipEx("未存在可恢复文件", 1000)
 
         loop parse FileRead(p), "`n", "`r"
         {
-            if (A_LoopField ~= "<-->移动$")
+            tmp := StrSplit(A_LoopField, "<-->")
+            if tmp.Length == 2 && FileExist(tmp[2])
             {
-                tmp := StrSplit(A_LoopField, "<-->")
-                if tmp.Length == 3 && FileExist(tmp[2])
-                {
-                    rArr.Push([tmp[2], tmp[1]])
-                    files .= A_LoopField "`n"
-                }
+                rArr.Push([tmp[2], tmp[1]])
+                files .= A_LoopField "`n"
             }
         }
 
         if t == 3 && files
         {
             files := RTrim(files, "`n")
-            guid := Trim(CreateGUID(), "{}")
-            if (!guid)
-                guid := A_TickCount
-            _temp := A_Temp "\" guid ".txt"
-            FileAppend(files, _temp)
+            temp := TempPath()
+            FileWrite(files, temp)
 
-            _time := FileGetTime(_temp)
-            SplitPath(_temp, &_title, &_runDir)
-            Run(ini.editor ' "' _temp '"', _runDir)
+            time := FileGetTime(temp)
+            SplitPath(temp, &title, &runDir)
+            Run(ini.editor ' "' temp '"', runDir)
 
-            if _hwnd := WinWait(_title, , 5)
+            if hwnd := WinWait(title, , 5)
             {
-                WinWaitClose(_hwnd)
-                if myG.gui && myG.restore != 3
+                WinWaitClose(hwnd)
+                if g.gui && this.restoreType != 3
                     return
 
-                if FileGetTime(_temp) != _time
+                if FileGetTime(temp) != time
                 {
                     rArr := []
-                    loop parse FileRead(_temp), "`n", "`r"
+                    loop parse FileRead(temp), "`n", "`r"
                     {
-                        if (A_LoopField ~= "<-->移动$")
-                        {
-                            tmp := StrSplit(A_LoopField, "<-->")
-                            if tmp.Length == 3 && FileExist(tmp[2])
-                                rArr.Push([tmp[2], tmp[1]])
-                        }
+                        tmp := StrSplit(A_LoopField, "<-->")
+                        if tmp.Length == 2 && FileExist(tmp[2])
+                            rArr.Push([tmp[2], tmp[1]])
                     }
-
                 }
             }
+            try
+                FileDelete(temp)
         }
 
         if rArr.Length
@@ -295,11 +275,188 @@ class log
                 case 2: rtype := " 恢复全部"
                 case 3: rtype := " 恢复部分"
             }
-            ToolTipEx(app rtype " 共成功: " sucsess " 项; 失败: " failure " 项", 1000)
+            msg := " 共成功: " sucsess " 项"
+            if failure
+                msg .= "; 失败: " failure " 项"
+            ToolTipEx(app rtype msg, 1000)
         }
         else
             ToolTipEx("未存在可恢复文件", 1000)
     }
+}
+
+class data
+{
+    static arr := ""
+    static arrInit := ""
+    static subArr := ""
+    static currentArr := []
+    static path := ""
+    static subFolder := -1
+    static subLevel := -1
+    static pathType := -1
+    static filter := ""
+    static isUpdate := false
+
+    static Init(arr)
+    {
+        this.subFolder := -1
+        this.subLevel := -1
+        this.pathType := -1
+        this.path := TempPath()
+        this.CreateArr(arr)
+        this.Write2File()
+    }
+
+    static CreateArr(list, new := false)
+    {
+        subArr := []
+        arr := []
+        isSub := ini.subFolder && ini.subLevel
+        this.loopLength := 0
+
+        if !new
+            this.arrInit := []
+
+        SetTitle("加载中...")
+        for i in list
+        {
+            if FileExist(path := new ? i[1] : i)
+            {
+                if !new
+                {
+                    path := GetFullPath(path, &attrib)
+                    isDir := InStr(attrib, "D") ? true : false
+                    pushArr := [path, isDir, attrib]
+                    this.arrInit.Push(pushArr)
+                }
+                else
+                {
+                    attrib := i[3]
+                    isDir := i[2]
+                    pushArr := [path, isDir, attrib]
+                }
+
+                if AttribFilter(attrib)
+                    continue
+
+                subArr.Push(pushArr)
+                arr.Push(pushArr)
+
+                if isDir && isSub
+                    LoopFilesLevel(path, subArr, ini.subLevel)
+            }
+        }
+
+        this.arr := arr
+        this.subArr := subArr
+        this.currentArr := isSub ? subArr : arr
+
+        ; https://www.autohotkey.com/boards/viewtopic.php?style=19&p=392871#p392871
+        LoopFilesLevel(rootFolder, arr, level := 1, enumerateFiles := true)
+        {
+            Loop Files, rootFolder . "\*", "D" . (enumerateFiles ? "F" : "")
+            {
+                if AttribFilter(A_LoopFileAttrib)
+                    continue
+
+                arr.Push([A_LoopFileFullPath, 0, A_LoopFileAttrib])
+
+                if arr.Length - 100 > this.loopLength
+                    SetTitle(this.loopLength := arr.Length)
+
+                if (level > 1 && InStr(A_LoopFileAttrib, "D"))
+                {
+                    arr[arr.Length][2] := 1
+                    LoopFilesLevel(A_LoopFilePath, arr, level - 1, enumerateFiles)
+                }
+            }
+        }
+
+        GetFullPath(f, &attrib)
+        {
+            loop files f, "DF"
+            {
+                attrib := A_LoopFileAttrib
+                return A_LoopFileFullPath
+            }
+        }
+
+        AttribFilter(attrib)
+        {
+            for i in ini.filterArr
+                if InStr(attrib, i)
+                    return true
+        }
+    }
+
+    static Update()
+    {
+        if !FileExist(this.path) || this.isUpdate
+            return
+
+        this.isUpdate := true
+        isChange := false
+        if this.filter != ini.filter
+            this.CreateArr(this.arrInit.Clone(), true), isChange := true
+        else if ini.subFolder
+        {
+            if ini.subLevel && (this.subFolder != ini.subFolder || this.subLevel != ini.subLevel)
+                this.CreateArr(this.arr, true), isChange := true
+            else if this.subLevel != ini.subLevel
+                this.currentArr := this.arr, isChange := true
+            else if this.pathType != ini.pathType
+                this.currentArr := this.subArr, isChange := true
+        }
+        else if this.pathType != ini.pathType || (this.subFolder != ini.subFolder && ini.subLevel)
+            this.currentArr := this.arr, isChange := true
+
+        if isChange
+            this.Write2File()
+        this.isUpdate := false
+    }
+
+    static Write2File()
+    {
+        files := ""
+        SetTitle("加载中...")
+        if ini.pathType
+        {
+            for i in this.currentArr
+            {
+                SplitPath(i[1], &name, &dir, &ext, &nameNoExt)
+                if i[2] && InStr(name, ".")
+                {
+                    nameNoExt := name
+                    ext := ""
+                }
+
+                switch ini.pathType
+                {
+                    case 1: files .= name "`n"
+                    case 2: files .= nameNoExt "`n"
+                    case 3: files .= ext "`n"
+                }
+            }
+        }
+        else
+            for i in this.currentArr
+                files .= i[1] "`n"
+
+        FileWrite(RTrim(files, "`n"), this.path)
+        SetTitle(this.currentArr.Length)
+        this.subFolder := ini.subFolder
+        this.subLevel := ini.subLevel
+        this.pathType := ini.pathType
+        this.filter := ini.filter
+    }
+}
+
+FileWrite(str, path)
+{
+    f := FileOpen(path, "w")
+    f.Write(str)
+    f.Close()
 }
 
 ToolTipEx(s, time := 2000, wait := false)
@@ -311,173 +468,176 @@ ToolTipEx(s, time := 2000, wait := false)
         SetTimer(() => ToolTip(), -time)
 }
 
-
-class myG
+TrayMenu()
 {
-    static temp := ""
-    static arr := []
-    static blankLine := 0
-    static restore := 0
-    static gui := ""
+    A_TrayMenu.Delete()
+    A_TrayMenu.Add("界面", (*) => OpenGui())
+    A_TrayMenu.Add("恢复上次", (*) => log.Restore(1))
+    A_TrayMenu.Add("退出", (*) => ExitApp())
+}
 
-    static OpenGui()
+SetTitle(str)
+{
+    if g.gui
+        g.gui.Title := str " - " app
+}
+
+TempPath()
+{
+    if !(guid := Trim(CreateGUID(), "{}"))
+        guid := A_TickCount
+    return A_Temp "\" guid ".txt"
+}
+
+OpenGui()
+{
+    if g.gui && WinExist(g.gui.hwnd)
+        return WinActivate()
+
+    g.gui := Gui()
+    g.gui.SetFont(, "Segoe UI")
+    g.gui.Opt("+AlwaysOnTop +ToolWindow")
+    SetTitle(data.currentArr.Length)
+    g.gui.Add("Text", , "拖拽文件至此进行重命名")
+
+    g.gui.Add("Checkbox", "Checked" ini.subFolder, "包含子目录").OnEvent("Click", (ctrl, info) => (ini.setWrite(ini.subFolder := ctrl.Value, "subFolder"), data.Update()))
+    g.gui.Add("Text", "yp ", "层级")
+    g.gui.Add("Edit", "yp Number w50 h18", "").OnEvent("Change", SubLevelChange)
+    g.gui.Add("UpDown", "yp", ini.subLevel)
+
+    pathType := ini.pathType
+    g.gui.Add("GroupBox", "xs Section w180 r2", "路径").GetPos(&x, &y)
+    full := g.gui.Add("Radio", "Section x" x + 10 " y" y + 20 " Checked" (pathType == 0), "全路径")
+    full.OnEvent("Click", EditType)
+    name := g.gui.Add("Radio", "yp Checked" (pathType == 1), "文件名")
+    name.OnEvent("Click", EditType)
+    ext := g.gui.Add("Radio", "xs Checked" (pathType == 3), "扩展名")
+    ext.OnEvent("Click", EditType)
+    nameNoExt := g.gui.Add("Radio", "yp Checked" (pathType == 2), "不带扩展名")
+    nameNoExt.OnEvent("Click", EditType)
+
+    g.gui.Add("GroupBox", "xs Section w180 r1 y+20 x" x, "过滤").GetPos(&x, &y)
+    dir := g.gui.Add("Checkbox", "x" x + 10 " y" y + 20 " Checked" InStr(ini.filter, "D"), "目录")
+    dir.OnEvent("Click", FilterChange)
+    sys := g.gui.Add("Checkbox", "yp Checked" InStr(ini.filter, "S"), "系统")
+    sys.OnEvent("Click", FilterChange)
+    hide := g.gui.Add("Checkbox", "yp Checked" InStr(ini.filter, "H"), "隐藏")
+    hide.OnEvent("Click", FilterChange)
+
+    g.gui.Add("GroupBox", "xs Section w180 r1 y+20 x" x, "恢复").GetPos(&x, &y)
+    g.gui.Add("Radio", "x" x + 10 " y" y + 20, "上次").OnEvent("Click", (*) => log.Restore(1))
+    g.gui.Add("Radio", "yp", "全部").OnEvent("Click", (*) => log.Restore(2))
+    g.gui.Add("Radio", "yp", "部分").OnEvent("Click", (*) => log.Restore(3))
+
+    g.gui.Add("Button", "xs", "编辑器").OnEvent("Click", (*) => ChooseEditor())
+    g.gui.Add("Button", "yp", "备").OnEvent("Click", (*) => ChooseEditor(true))
+    g.gui.Add("Button", "yp", "目录").OnEvent("Click", (*) => Run(A_ScriptDir))
+    g.gui.Add("Button", "yp", "ini").OnEvent("Click", (*) => Run(ini.path))
+
+    pos := ""
+    if ini.guiX || ini.guiY
+        pos := " x" ini.guiX " y" ini.guiY
+    g.gui.Show("w200 " pos)
+    g.gui.OnEvent("DropFiles", (GuiObj, GuiCtrlObj, FileArray, X, Y) => BeginRename(FileArray))
+    g.gui.OnEvent("Escape", ExitG)
+    g.gui.OnEvent("Close", ExitG)
+
+    EditType(ctrl, info)
     {
-        if this.gui && WinExist(this.gui.hwnd)
-            return WinActivate()
-
-        this.gui := Gui()
-        this.gui.SetFont(, "Segoe UI")
-        this.gui.Opt("+AlwaysOnTop +ToolWindow")
-        this.gui.Title := this.arr.Length " - " app
-        this.gui.Add("Text", , "拖拽文件至此进行重命名")
-
-        filename := ini.filename
-        rs1 := this.gui.Add("GroupBox", "Section w180 r2", "路径")
-        rs1.GetPos(&x, &y)
-
-        full := this.gui.Add("Radio", "Section x" x + 10 " y" y + 20 " Checked" (filename == 0), "全路径")
-        full.OnEvent("Click", EditType)
-        name := this.gui.Add("Radio", "yp Checked" (filename == 1), "文件名")
-        name.OnEvent("Click", EditType)
-        ext := this.gui.Add("Radio", "xs Checked" (filename == 3), "扩展名")
-        ext.OnEvent("Click", EditType)
-        nameNoExt := this.gui.Add("Radio", "yp Checked" (filename == 2), "不带扩展名")
-        nameNoExt.OnEvent("Click", EditType)
-
-
-        rs2 := this.gui.Add("GroupBox", "xs Section w180 r1 y+20 x" x, "恢复")
-        rs2.GetPos(&x, &y)
-        this.gui.Add("Radio", "x" x + 10 " y" y + 20, "上次").OnEvent("Click", (*) => log.Restore(this.restore := 1))
-        this.gui.Add("Radio", "yp", "全部").OnEvent("Click", (*) => log.Restore(this.restore := 2))
-        this.gui.Add("Radio", "yp", "部分").OnEvent("Click", (*) => log.Restore(this.restore := 3))
-
-
-        this.gui.Add("Button", "xs", "自定义编辑器").OnEvent("Click", ChooseEditor)
-        this.gui.Add("Button", "yp x+18", "更多设置").OnEvent("Click", (*) => Run(ini.path))
-
-        pos := ""
-        if ini.guiX || ini.guiY
-            pos := " X" ini.guiX " y" ini.guiY
-        this.gui.Show("w200 " pos)
-        this.gui.OnEvent("DropFiles", (GuiObj, GuiCtrlObj, FileArray, X, Y) => BeginRename(FileArray))
-        this.gui.OnEvent("Escape", ExitG)
-        this.gui.OnEvent("Close", ExitG)
-
-        EditType(ctrl, Info)
+        switch ctrl
         {
-            switch ctrl
-            {
-                case full: t := 0
-                case name: t := 1
-                case nameNoExt: t := 2
-                case ext: t := 3
-            }
-            ini.filename := t
-            ini.setWrite(t, "filename")
+            case full: t := 0
+            case name: t := 1
+            case nameNoExt: t := 2
+            case ext: t := 3
+        }
+        ini.setWrite(ini.pathType := t, "pathType")
+        data.Update()
+    }
 
-            if !FileExist(this.temp) || !this.arr.Length
+    SubLevelChange(ctrl, info)
+    {
+        static time := ""
+        SetTimer(() => Update(time := A_TickCount), -200)
+
+        Update(tick)
+        {
+            if time != A_TickCount
                 return
 
-            files := ""
-            if t == 0
-                for i in this.arr
-                    files .= i "`n"
-            files := FilenameType(this.arr, files)
-
-            loop this.blankLine
-                files .= "`n"
-
-            f := FileOpen(this.temp, "w")
-            f.Write(files)
-            f.Close()
-        }
-
-        ChooseEditor(*)
-        {
-            this.gui.Opt("+OwnDialogs")
-            path := FileSelect("1", , app " 请选择编辑器")
-            if path
-                ini.setWrite(ini.editor := path, "editor")
-        }
-
-        ExitG(*)
-        {
-            this.gui.GetPos(&x, &y)
-            ini.setWrite(x, "guiX")
-            ini.setWrite(y, "guiY")
-            try
-                FileDelete(this.temp)
-            ExitApp()
+            ini.setWrite(ini.subLevel := ctrl.Value, "subLevel")
+            data.Update()
         }
     }
-}
 
-FilenameType(arr, files := "")
-{
-    if filename := ini.filename
+    FilterChange(ctrl, info)
     {
-        files := ""
-        for i in arr
+        switch ctrl
         {
-            SplitPath(i, &name, &dir, &ext, &nameNoExt)
-            switch filename
+            case dir: IniChange("D", ctrl.Value)
+            case sys: IniChange("S", ctrl.Value)
+            case hide: IniChange("H", ctrl.Value)
+        }
+        data.Update()
+
+        IniChange(attrib, add)
+        {
+            if add && !InStr(ini.filter, attrib)
             {
-                case 1: files .= name "`n"
-                case 2: files .= nameNoExt "`n"
-                case 3: files .= ext "`n"
+                ini.setWrite(ini.filter .= attrib, "filter")
+                ini.filterArr.Push(attrib)
+            }
+            else if !add && InStr(ini.filter, attrib)
+            {
+                ini.setWrite(ini.filter := StrReplace(ini.filter, attrib), "filter")
+                loop ini.filterArr.Length
+                {
+                    if ini.filterArr[ini.filterArr.Length + 1 - A_Index] == attrib
+                    {
+                        ini.filterArr.RemoveAt(ini.filterArr.Length + 1 - A_Index)
+                        break
+                    }
+                }
             }
         }
     }
-    return RTrim(files, "`n")
-}
 
-BeginRename(list, notfull := true, tmep := "", cp := "")
-{
-    if ini.gui && !myG.gui
-        myG.OpenGui()
-
-    arr := list
-
-    if notfull || !tmep
+    ChooseEditor(second := false)
     {
-        arr := []
-        files := ""
-        for i in list
-            if (FileExist(i))
-                loop files i, "DF"
-                    arr.Push(A_LoopFileFullPath), files .= A_LoopFileFullPath "`n"
-
-        guid := Trim(CreateGUID(), "{}")
-        if (!guid)
-            guid := A_TickCount
-        tmep := A_Temp "\" guid ".txt"
-
-        files := FilenameType(arr, files)
-
-        if (files)
+        g.gui.Opt("+OwnDialogs")
+        path := FileSelect("1", , app (second ? " 请选择备用编辑器" : " 请选择编辑器"))
+        if path
         {
-            try
-                FileDelete(tmep)
-            FileAppend(files, tmep)
+            if !second
+                ini.setWrite(ini.editor := path, "editor")
+            else
+                ini.setWrite(ini.secondEditor := path, "secondEditor")
         }
     }
 
-    myG.temp := tmep
-    myG.arr := arr
-    ;空白的行用于填充
-    myG.blankLine := 0
-    loop
+    ExitG(*)
     {
-        if !myG.arr[myG.arr.Length - A_Index + 1]
-            myG.blankLine ++
-        else
-            break
+        g.gui.GetPos(&x, &y)
+        ini.setWrite(x, "guiX")
+        ini.setWrite(y, "guiY")
+        try
+            FileDelete(data.path)
+        ExitApp()
     }
-    if myG.gui
-        myG.gui.Title := arr.Length " - " app
+}
 
-    time := FileGetTime(tmep)
-    SplitPath(tmep, &title, &runDir)
+BeginRename(list)
+{
+    if data.currentArr.Length
+        return
+
+    if ini.gui && !g.gui
+        OpenGui()
+
+    data.Init(list)
+
+    time := FileGetTime(data.path)
+    SplitPath(data.path, &title, &runDir)
     editor := ini.editor
     if ini.secondEditor && FileExist(ini.secondEditor)
     {
@@ -485,45 +645,67 @@ BeginRename(list, notfull := true, tmep := "", cp := "")
         if editorName && WinExist("ahk_exe " editorName)
             editor := ini.secondEditor
     }
-
-    Run(editor ' "' tmep '"', runDir)
-    count := 0
+    Run(editor ' "' data.path '"', runDir)
+    sucsess := 0
+    failure := 0
 
     if hwnd := WinWait(title, , 5)
     {
         if ini.muiltTab
-            WinWaitNotActive(title)
+        {
+            while WinExist(title)
+                Sleep(20)
+        }
         else
             WinWaitClose(hwnd)
 
-        if FileGetTime(tmep) != time || ini.formatName
+        if FileGetTime(data.path) != time || ini.reArr.Length
         {
             arr2 := []
 
-            loop parse FileRead(tmep, cp), "`n", "`r"
+            loop parse FileRead(data.path), "`n", "`r"
                 arr2.Push(A_LoopField)
 
-            if arr.Length != arr2.Length
+            if data.currentArr.Length != arr2.Length
             {
                 MsgBox("原始文件与目标文件数量不符")
                 ExitApp(1)
             }
 
-            loop arr.Length
+            length := arr2.Length
+            loop arr2.Length
             {
-                souce := arr[A_Index]
-                out := arr2[A_Index]
+                index := arr2.Length + 1 - A_Index
+                souce := data.currentArr[index][1]
+                isDir := data.currentArr[index][2]
+                out := arr2[index]
+
+                if length - index > 100
+                {
+                    SetTitle(index "/" arr2.Length)
+                    length := index
+                }
+
                 if !FileExist(souce)
                     continue
 
-                if filename := ini.filename
+                if ini.pathType
                 {
                     SplitPath(souce, &name, &dir, &ext, &nameNoExt)
-                    switch filename
+
+                    if ini.pathType == 1
+                        name := out
+                    else
                     {
-                        case 1: out := dir "\" batchReplace(out)
-                        case 2: out := dir "\" batchReplace(out (ext ? "." ext : ""))
-                        case 3: out := dir "\" batchReplace(nameNoExt (out ? "." out : ""))
+                        if isDir && InStr(name, ".")
+                        {
+                            nameNoExt := name
+                            ext := ""
+                        }
+                        if ini.pathType == 2
+                            name := out (ext ? "." ext : "")
+                        else if ini.pathType == 3
+                            name := nameNoExt (out ? "." out : "")
                     }
                 }
                 else
@@ -535,33 +717,42 @@ BeginRename(list, notfull := true, tmep := "", cp := "")
                             DirCreate(dir)
                         catch
                         {
-                            log.Push(souce, out, "目标文件夹错误")
+                            failure++
+                            log.Push(souce, out)
                             continue
                         }
                     }
-                    out := dir "\" batchReplace(name)
                 }
+
+                for i in ini.reArr
+                    name := (i[3] ? RegExReplace : StrReplace)(name, i[1], i[2])
+
+                out := dir "\" name
 
                 if out == souce
                     continue
 
                 if FileExist(out)
                 {
-                    log.Push(souce, out, "目标文件已存在")
+                    failure++
+                    log.Push(souce, out)
                     continue
                 }
 
                 try
                 {
-                    if DirExist(souce)
+                    if isDir
                         DirMove(souce, out)
                     else
                         FileMove(souce, out)
-                    log.Push(souce, out)
-                    count++
+                    log.Push(souce, out, false)
+                    sucsess++
                 }
                 catch Error as e
-                    log.Push(souce, out, "未知错误: " e.What)
+                {
+                    failure++
+                    log.Push(souce, out)
+                }
             }
         }
     }
@@ -569,43 +760,28 @@ BeginRename(list, notfull := true, tmep := "", cp := "")
         MsgBox("编辑器可能配置错误")
 
     try
-        FileDelete(tmep)
+        FileDelete(data.path)
 
-    if ini.logSave && log.list.Length
-        log.Save()
+    log.Save()
 
-    if ini.tipCount && count
-        ToolTipEx(app ": 已处理 " count "/" arr.Length " 项", , !myG.gui)
-
-    if myG.gui
+    if sucsess || failure
     {
-        if count
-            myG.gui.Title := count "/" arr.Length " - " app
-        else
-            myG.gui.Title := "0 - " app
+        msg := app ": 已处理 " sucsess "/" data.currentArr.Length " 项"
+        if failure
+            msg .= "; 失败: " failure " 项"
+        ToolTipEx(msg, , !g.gui)
     }
-    else
+
+    if !g.gui
         ExitApp()
 
-    batchReplace(str)
-    {
-        if ini.formatName
-            str := Trim(RenameSafe(str))
+    if sucsess || failure
+        SetTitle(sucsess "/" failure "/" data.currentArr.Length)
+    else
+        SetTitle(0)
 
-        for i in ini.reArr
-            if Type(i) == "Array"
-                str := (i[3] ? RegExReplace : StrReplace)(str, i[1], i[2])
-
-        return str
-    }
+    data.currentArr := []
 }
 
-TrayMenu()
-{
-    A_TrayMenu.Delete()
-    A_TrayMenu.Add("界面", (*) => myG.OpenGui())
-    A_TrayMenu.Add("恢复上次", (*) => log.Restore(1))
-    A_TrayMenu.Add("退出", (*) => ExitApp())
-}
 #Include <CreateGUID>
 #Include <RenameSafe>
