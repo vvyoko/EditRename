@@ -23,10 +23,10 @@
 
 ### 截图
 - 使用流程
-    - ![gif](pic\gif.gif)
+    - ![gif](pic/gif.gif)
 
 - 完整界面
-    - ![all](pic\all.jpeg)
+    - ![all](pic/all.jpeg)
 
 
 ### 下载链接 :
