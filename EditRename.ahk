@@ -32,7 +32,6 @@ else if A_Args.Length
 else
     MainGui()
 
-
 class ini extends iniBase
 {
     static Init(path)
@@ -269,7 +268,7 @@ class data
     ;是否在编辑状态
     static length => this.currentSp.Length
     static inEdit => this.Length && FileExist(this.path)
-    static time => Get(this.path, "time")
+    static time => FileGetProperty(this.path, "time")
     static timeSave := 0
     ;生成时间,如果时间未变则表示文件未修改
     static InitTime := 0
@@ -295,6 +294,8 @@ class data
         this.path := TempPath(&title)
         this.title := title
         this.CreateArr(arr)
+        try
+            arr.RemoveAt(1, arr.length)
         this.Write2File()
         this.InitTime := this.time
         this.version++
@@ -440,11 +441,11 @@ class pathBase
     ;路径是否更改
     IsChange => this._out !== this.souce
 
-    time => Get(this.souce, "time")
-    timeC => Get(this.souce, "timeC")
-    size => Get(this.souce, "size")
-    sizeK => Get(this.souce, "sizeK")
-    sizeM => Get(this.souce, "sizeM")
+    time => FileGetProperty(this.souce, "time")
+    timeC => FileGetProperty(this.souce, "timeC")
+    size => FileGetProperty(this.souce, "size")
+    sizeK => FileGetProperty(this.souce, "sizeK")
+    sizeM => FileGetProperty(this.souce, "sizeM")
 
     imgW => this.Get("System.Image.HorizontalSize")
     imgH => this.Get("System.Image.VerticalSize")
@@ -484,58 +485,59 @@ class pathBase
     }
 
     ;路径批量操作  t 1动作 -1刷新 0正常
-    static Batch(sp, out, attrib, t := 0)
+    Batch(out, t := 0)
     {
-        if ini.exDir && sp.isDir
+        if ini.exDir && this.isDir
             return -1
-        if ini.exFile && !sp.isDir
+        if ini.exFile && !this.isDir
             return -1
-        if ini.exSys && InStr(attrib, "S")
+        if ini.exSys && InStr(this.attrib, "S")
             return -1
-        if ini.exHide && InStr(attrib, "H")
+        if ini.exHide && InStr(this.attrib, "H")
             return -1
-        if ini.exReadonly && InStr(attrib, "R")
+        if ini.exReadonly && InStr(this.attrib, "R")
             return -1
-        if ini.exRP && InStr(attrib, "L")
+        if ini.exRP && InStr(this.attrib, "L")
             return -1
 
-        if t = 0 && !FileExist(sp.souce)
+        if t = 0 && !FileExist(this.souce)
             return -1
 
         if t < 1 && data.timeSave = data.time
             return
 
-        this.FromTmp(sp, out, ini.env ? true : false)
+        this.FromTmp(out)
 
         if t < 1
-            edit.RE(sp)
+            edit.RE(this)
 
         if ini.trim
-            sp.nameNoExt := Trim(sp.nameNoExt)
+            this.nameNoExt := Trim(this.nameNoExt)
 
         if ini.safe
-            sp.nameNoExt := RenameSafe(sp.nameNoExt)
+            this.nameNoExt := RenameSafe(this.nameNoExt)
     }
 
-    static FromTmp(sp, out, isenv := false)
+    FromTmp(out)
     {
         switch ini.pathType
         {
-            case 0: sp.out := isenv ? env.exec(out, sp) : out
-            case 1: sp.name := isenv ? env.exec(out, sp) : out
-            case 2: sp.nameNoExt := isenv ? env.exec(out, sp) : out
-            case 3: sp.ext := isenv ? env.exec(out, sp) : out
+            case 0: this.out := out
+            case 1: this.name := out
+            case 2: this.nameNoExt := out
+            case 3: this.ext := out
         }
     }
 
     ToTmp(index)
     {
+        lastLine := IsLastLine(index)
         switch ini.pathType
         {
-            case 0: return this.out IsLastLine(index)
-            case 1: return this.Name IsLastLine(index)
-            case 2: return this.nameNoExt IsLastLine(index)
-            case 3: return this.ext IsLastLine(index)
+            case 0: return this.out lastLine
+            case 1: return this.Name lastLine
+            case 2: return this.nameNoExt lastLine
+            case 3: return this.ext lastLine
         }
     }
 
@@ -570,7 +572,7 @@ class pathBase
         {
             if Value == this._out
                 return
-            SplitPathEx(Value, &name, &dir, &ext, &nameNoExt, this.isDir)
+            SplitPathEx(env.exec(Value, this), &name, &dir, &ext, &nameNoExt, this.isDir)
             this._name := name
             this.dir := dir
             this._ext := ext
@@ -586,7 +588,7 @@ class pathBase
         {
             if Value == this._name
                 return
-            this._name := Value
+            this._name := env.exec(Value, this)
             SplitPathEx(this._out, , , &ext, &nameNoExt, this.isDir)
             this._nameNoExt := nameNoExt
             this._ext := ext
@@ -601,7 +603,7 @@ class pathBase
         {
             if Value == this._nameNoExt
                 return
-            this._nameNoExt := Value
+            this._nameNoExt := env.exec(Value, this)
             this._name := Value (this._ext ? "." this._ext : "")
         }
         get => this._nameNoExt
@@ -614,7 +616,7 @@ class pathBase
         {
             if this.isDir || Value == this._ext
                 return
-            this._ext := Value
+            this._ext := env.exec(Value, this)
             this._name := this._nameNoExt (Value ? "." Value : "")
         }
         get => this._ext
@@ -633,13 +635,13 @@ class pathBase
         }
         count := 0
         if arr[4] = 1
-            this.%var% := RegExReplace(this.%var%, arr[2], arr[3], &count)
+            this.%var% := RegExReplace(this.%var%, env.exec(arr[2], this), arr[3], &count)
         else
-            this.%var% := StrReplace(this.%var%, arr[2], arr[3], arr[4] != 2, &count)
+            this.%var% := StrReplace(this.%var%, env.exec(arr[2], this), arr[3], arr[4] != 2, &count)
         this.count += count
     }
 
-    ;移除原始路径到目标路径 s成功 f失败
+    ;移动原始路径到目标路径 s成功 f失败
     Move(&s, &f)
     {
         if !this.IsChange
@@ -818,7 +820,7 @@ class net
                 }
             )"
 
-    try
+        try
         {
 
             asm := CLR_CompileCS(cs, "System.Web.dll")
@@ -833,19 +835,7 @@ class net
         }
     }
 
-    static UrlDecode(str, muilt := false)
-    {
-        if this.hasNet
-            return this.cs.UrlDecode(str)
-
-        if muilt && InStr(str, "`n")
-        {
-            tmp := StrReplace(str, "`n", ";")
-            str := StrReplace(URIDecode(tmp), ";", "`n")
-        }
-        else
-            str := URIDecode(str)
-    }
+    static UrlDecode(str) => this.hasNet ? this.cs.UrlDecode(str) : UrlDecode(str)
 
     static Diff(s1, s2) => this.hasNet ? this.cs.Diff(s1, s2) : Diff(s1, s2)
 
@@ -931,7 +921,6 @@ class exp
         }
         return b
 
-
         Test(arr, &v := "")
         {
             if arr.Length != 4 || !StrLen(arr[4])
@@ -959,7 +948,7 @@ class exp
                 case "不包含": return !InStr(v, s)
                 case "正则匹配":
                     try
-                        return (v ~= s)
+                        return v ~= s
                 case "正则不匹配":
                     try
                         return !(v ~= s)
@@ -999,7 +988,6 @@ class exp
     }
 }
 
-
 class action
 {
     static STitle := ""
@@ -1014,7 +1002,6 @@ class action
         g.running := false
     }
 
-
     static dir := A_ScriptDir "\Action\"
 
     static Read(name) => name && FileExist(this.dir name) ? FileRead(this.dir name) : ""
@@ -1028,7 +1015,7 @@ class action
     }
 
     ;执行动作
-    static Exec(name)
+    static Exec(name, context?)
     {
         if g.running
             return this.Title("在编辑状态中...")
@@ -1036,8 +1023,13 @@ class action
         if !data.inEdit
             return this.Title("未在编辑状态")
 
-        if !FileExist(path := this.dir name)
-            return this.Title("规则不存在?")
+        if !IsSet(context)
+        {
+            if !FileExist(path := this.dir name)
+                return this.Title("规则不存在?")
+            else
+                context := FileRead(path)
+        }
 
         g.running := true
 
@@ -1049,19 +1041,17 @@ class action
                 data.undo.Push(pathBase(i.out, i.isDir, i.attrib))
         }
 
-        ; now := A_TickCount
-        hasUri := false
         actionArr := []
-        conditionAArr := []
+        conditionArr := []
         env.retsore()
-        for i in StrSplit(FileRead(path), "`n")
+        for i in StrSplit(context, "`n")
         {
             _exp := exp.String2Arr(&i)
 
             if RegExMatch(i, "^;全局;")
             {
                 if _exp
-                    conditionAArr.Push(_exp)
+                    conditionArr.Push(_exp)
             }
             else if RegExMatch(i, "^;插入([前后]);(.+)", &m)
             {
@@ -1070,14 +1060,7 @@ class action
                 actionArr.Push(["i", [rule, m[1] = "前" ? 0 : 1], _exp])
             }
             else if RegExMatch(i, "^;转换;(.+)", &m)
-            {
-                if net.hasNet
-                    actionArr.Push(["c", m[1], _exp])
-                else if m[1] != "D"
-                    actionArr.Push(["c", m[1], _exp])
-                else
-                    hasUri := true, DArr := []
-            }
+                actionArr.Push(["c", m[1], _exp])
             else if RegExMatch(i, "^;排除([选消]);(.+)", &m)
             {
                 fm := Map("文件", "exFile", "目录", "exDir", "符号", "exRP", "只读", "exReadonly", "隐藏", "exHide", "系统", "exSys")
@@ -1100,9 +1083,11 @@ class action
                 actionArr.Push(["m", m[1], _exp])
             else if RegExMatch(i, "^;删除;(.+)", &m)
                 actionArr.Push(["d", , _exp])
+            else if RegExMatch(i, "^;删除并填充;")
+                actionArr.Push(["di", , _exp])
         }
 
-        if !actionArr.Length && !hasUri
+        if !actionArr.Length
             return this.Title("未存在符合的动作")
 
         tmp := ""
@@ -1121,17 +1106,11 @@ class action
             index := A_Index
 
             out := arr2[index]
-            if pathBase.Batch(i, arr2[index], i.attrib, 1) = -1
+            if i.Batch(arr2[index], 1) = -1 || conditionFn(i)
             {
-                if hasUri
-                    DArr.Push(i)
                 tmp .= i.ToTmp(index)
                 continue
             }
-
-            for k in conditionAArr
-                if !exp.Exec(k, i)
-                    continue 2
 
             for k in actionArr
             {
@@ -1142,70 +1121,47 @@ class action
                 {
                     case "i":
                         if k[2][2]
-                            i.nameNoExt := env.exec(i.nameNoExt k[2][1], i)
+                            i.nameNoExt := i.nameNoExt k[2][1], i
                         else
-                            i.nameNoExt := env.exec(k[2][1] i.nameNoExt, i)
+                            i.nameNoExt := k[2][1] i.nameNoExt, i
                     case "r":
                         try
                             edit.REItem(i, k[2])
                         catch
                             actionArr.RemoveAt(A_Index)
                     case "c":
-                        if nameNoExt := edit.Convert(k[2], i.nameNoExt, true)
+                        if nameNoExt := edit.Convert(k[2], i.nameNoExt)
                             i.nameNoExt := nameNoExt
                     case "m": i.dir := k[2]
                     case "d": delCount += TryFileDelete(i.souce, true) ? 1 : 0
+                    case "di":
+                        if TryFileDelete(i.souce, true)
+                        {
+                            FileAppend("", i.souce)
+                            delCount++
+                        }
                 }
             }
-
-            if hasUri
-                DArr.Push(i)
 
             if !isChange
                 isChange := i.IsChange
             tmp .= i.ToTmp(index)
         }
 
-        if hasUri
-        {
-            nameNoExts := ""
-            for i in DArr
-                nameNoExts .= i.nameNoExt IsLastLine(A_Index)
-
-            nameNoExts := edit.Convert("D", nameNoExts)
-
-            if nameNoExts
-            {
-                isChange := true
-                arr := StrSplit(nameNoExts, ";")
-                tmp := ""
-                if arr.Length != data.length || arr.Length != DArr.Length
-                    ToolTipEx("D 发生错误已跳过全部转换")
-                else
-                {
-                    for i in DArr
-                        if A_Index <= data.length
-                            tmp .= i.dir "\" arr[A_Index] (i.ext ? "." i.ext : "") IsLastLine(A_Index)
-                }
-                if !tmp
-                    isChange := false
-            }
-            else
-                ToolTipEx("D 发生错误已跳过全部转换")
-        }
-
         if isChange && tmp
-        {
-            if hasUri
-                g.pathTypeChange.Call(0, false)
             FileWrite(tmp, data.path), this.Title(name "执行完成" (delCount ? ", 删除 " delCount " 个文件" : ""))
-        }
         else if delCount
             this.Title(name " 删除 " delCount " 个文件")
         else
             this.Title(name " 未发生修改")
-    }
 
+        conditionFn(sp)
+        {
+            for i in conditionArr
+                if !exp.Exec(i, sp)
+                    return true
+        }
+    }
 
     ;删除动作
     static Delete(str)
@@ -1256,9 +1212,8 @@ class edit
         }
     }
 
-
     ;转换
-    static Convert(cType, str, muilt := false, &t := "", len := 0)
+    static Convert(cType, str, &t := "", len := 0)
     {
         switch cType
         {
@@ -1269,11 +1224,10 @@ class edit
             case "首": t := "首字母大写", str := StrTitle(str)
             case "半": t := "全角转半角", str := LCMapString(str, len, 4)
             case "全": t := "半角转全角", str := LCMapString(str, len, 3)
-            case "D": t := "URI解码", str := net.UrlDecode(str, muilt)
+            case "D": t := "URI解码", str := net.UrlDecode(str)
         }
         return str
     }
-
 }
 
 class env
@@ -1282,6 +1236,7 @@ class env
         ["递增数字", "<n>1;3;1;"],
         ["图包目录命名", "<p>"],
         ["当前时间", "<d>yyyy-MM-dd H-mm-ss;"],
+        ["剪贴板", "<clip>"],
         ["上级目录名称", "<f>"],
         ["文件修改时间", "<t>"],
         ["文件创建时间", "<tc>"],
@@ -1296,13 +1251,20 @@ class env
     }
 
     ;环境变量替换成目标值
-    static exec(str, sp)
+    static exec(str, sp := unset)
     {
         if !ini.env
             return str
 
         if !RegExMatch(str, "(<(.+)>)", &m)
             return str
+
+        if InStr(str, "<clip>") && !RegExMatch(A_Clipboard, "\R")
+            str := StrReplace(str, "<clip>", A_Clipboard)
+
+        if !IsSet(sp)
+            return str
+
         if ini.propertyMap.Has(m[2])
             str := StrReplace(str, m[1], sp.Get(m[2]))
 
@@ -1407,7 +1369,7 @@ class env
 
 }
 
-Get(path, t, df := 0)
+FileGetProperty(path, t, df := 0)
 {
     if !FileExist(path)
         return df
@@ -1519,9 +1481,9 @@ MainGui()
     AddCheckboxEx(var, opt := "", text := "", tips := "") => g.AddCheckboxEx(main, var, opt, text, tips)
 
     main.Add("GroupBox", "xs Section w170 r2 y+20 x" x, "恢复").GetPos(, &y)
-    main.AddRadio("x" x + 10 " y" y + 20, "上次").OnEvent("Click", (*) => log.Restore(1))
-    main.AddRadio("yp", "全部", , "log.txt太大可能影响速度,可删除").OnEvent("Click", (*) => log.Restore(2))
-    main.AddRadio("yp", "部分", , "log.txt太大可能影响速度,可删除").OnEvent("Click", (*) => log.Restore(3))
+    main.AddRadio("x" x + 10 " y" y + 20, "上次", , "恢复上次重命名的文件").OnEvent("Click", (*) => log.Restore(1))
+    main.AddRadio("yp", "全部", , "恢复所有重命名过的文件`nlog.txt太大可能影响速度,可删除").OnEvent("Click", (*) => log.Restore(2))
+    main.AddRadio("yp", "部分", , "在编辑器中显示所有可恢复文件`n保留要恢复的退出以恢复保留部分`nlog.txt太大可能影响速度,可删除").OnEvent("Click", (*) => log.Restore(3))
 
     main.AddButton("xs", "设", "打开设置界面").OnEvent("Click", (*) => MoreGui(4))
     main.AddButton("yp", "列", "查看文件列表").OnEvent("Click", (*) => MoreGui())
@@ -1567,7 +1529,6 @@ MainGui()
         if update
             data.Update()
     }
-
 
     ;设置路径类型并更新
     SetPathType(ctrl, info)
@@ -1639,12 +1600,11 @@ ExGui(*)
     for i in env.arr
         envNameArr.Push(i[1])
 
-
     action.STitle := STitle
     g.ex := ex := GuiEx("+AlwaysOnTop +ToolWindow", app net.title)
     ex.AddText(, "以下需编辑器支持重载")
     AddCheckboxEx("undo", "yp w10")
-    ex.AddButton("yp ", "撤消", "撤消上一步操作 仅此界面)`n需选中左边方框`n选中时增加耗时,消耗双倍内存").OnEvent("Click", UndoFunc)
+    ex.AddButton("yp ", "撤消", "撤消上一步操作 (仅此界面)`n需选中左边方框`n选中时增加耗时,消耗双倍内存").OnEvent("Click", UndoFunc)
     ex.AddButton("yp", "重命名", "直接执行重命名").OnEvent("Click", (*) => g.wait := false)
 
     ex.AddLink("yp", , "https://github.com/vvyoko/EditRename", "主页", "GitHub")
@@ -1674,9 +1634,6 @@ ExGui(*)
         连续执行多项操作
         点击 造 添加动作及查看说明
         点击 执行 执行当前动作
-        执行前可执行其他编辑
-        完成后仅支持在编辑器编辑
-        不要执行其他编辑操作,会重置修改
     )")
     ex.MarginY := 1
     ; ex.AddButton("yp w20", "-", "删除动作").OnEvent("Click", (*) => action.Delete(acAll.Text))
@@ -1727,7 +1684,7 @@ ExGui(*)
     ex.GetPos(, , &w)
     g.OnMove := OnMove
     g.ex.Change := Change
-    SetTimer(g.OnMove, 100)
+    SetTimer(g.OnMove, 30)
     ex.OnClose(CloseEx)
     ex.OnEvent("DropFiles", TagAdd)
 
@@ -1753,7 +1710,8 @@ ExGui(*)
             sp := pathBase(i, DirExist(i))
             sp.nameNoExt := ini.tagLast ? sp.nameNoExt " " tagStr : tagStr " " sp.nameNoExt
             edit.RE(sp)
-            sp.nameNoExt := RenameSafe(env.exec(sp.nameNoExt, sp))
+            sp.nameNoExt := sp.nameNoExt, sp
+            sp.nameNoExt := RenameSafe(sp.nameNoExt)
             sp.Move(&success, &failure)
         }
         log.Save()
@@ -1781,8 +1739,8 @@ ExGui(*)
                 手动在编辑器中设置规则
                 在第一项 <n> 后跟随规则,后续<n>将按此递增
             )"
-    case 2: ctrl.Tips := "只对文件夹命名, 示例 [35P-2V-550M]"
-        case 3: ctrl.Tips := "
+            case 2: ctrl.Tips := "只对文件夹命名, 示例 [35P-2V-550M]"
+            case 3: ctrl.Tips := "
             (
                 规则 时间格式; (如不设置默认格式如下)
                 <d>yyyy-MM-dd H-mm-ss; 为 2023-01-29 22-58-29
@@ -1791,8 +1749,9 @@ ExGui(*)
                 手动在编辑器中设置规则
                 在第一项 <d> 后跟随 时间格式; 后续<d>遵守此规则
             )"
-    envLink.Text := '<a id="help" href="https://wyagd001.github.io/v2/docs/lib/FormatTime.htm#Date_Formats">说明</a>'
-        default: ctrl.Tips := "简单说明请悬浮 环境变量 查看`n前3项有详细说明,选择并悬浮查看"
+                envLink.Text := '<a id="help" href="https://wyagd001.github.io/v2/docs/lib/FormatTime.htm#Date_Formats">说明</a>'
+            case 4: ctrl.Tips := "单行剪贴板,多行则为空`n可工作于替换"
+            default: ctrl.Tips := "简单说明请悬浮 环境变量 查看`n前3项有详细说明,选择并悬浮查看"
         }
     }
 
@@ -1807,7 +1766,9 @@ ExGui(*)
                 return
             }
             g.gui.GetPos(&x, &y, &w, &h)
-            g.ex.Move(x + w - 10, y)
+            g.ex.GetPos(&x1)
+            if x1 != x + w - 10
+                g.ex.Move(x + w - 10, y)
         }
         catch
             SetTimer(g.OnMove, 0)
@@ -1850,22 +1811,34 @@ ExGui(*)
             ini.ChangeKey(ReSave.Text, "reSaveText")
             t := "替换"
             arr := StrSplit(ReSave.Text, ";")
+            if arr.Length = 1
+                arr := ["简易替换", arr[1], "", 0, ini.pathType, ""]
+            else if arr.Length = 2
+                arr := ["简易替换2", arr[1], arr[2], 0, ini.pathType, ""]
+            if arr.Length != 6
+                return STitle("未设置替换规则或规则不正确 " arr.Length)
+
             if (arr2 := data.TmpToArr(, f)) = -1
                 return STitle("原始文件与目标文件数量不符")
+
             for i in data.currentSp
             {
-                pathBase.FromTmp(i, arr2[A_Index])
-                switch arr.Length
-                {
-                    case 1: i.nameNoExt := StrReplace(i.nameNoExt, arr[1])
-                    case 2: i.nameNoExt := StrReplace(i.nameNoExt, arr[1], arr[2])
-                    case 6:
-                        try
-                            edit.REItem(i, arr)
-                        catch
-                            return STitle("规则可能出错")
-                    default: return STitle("未设置替换规则或规则不正确 " arr.Length)
-                }
+                i.FromTmp(arr2[A_Index])
+                try
+                    edit.REItem(i, arr)
+                catch
+                    return STitle("规则可能出错")
+                ; switch arr.Length
+                ; {
+                ;     case 1: i.nameNoExt := StrReplace(i.nameNoExt, arr[1])
+                ;     case 2: i.nameNoExt := StrReplace(i.nameNoExt, arr[1], arr[2])
+                ;     case 6:
+                ;         try
+                ;             edit.REItem(i, arr)
+                ;         catch
+                ;             return STitle("规则可能出错")
+                ;     default: return STitle("未设置替换规则或规则不正确 " arr.Length)
+                ; }
                 tmp .= i.ToTmp(A_Index)
             }
         }
@@ -1903,7 +1876,7 @@ ExGui(*)
                 STitle("更新中...")
                 g.pathTypeChange.Call(2)
             }
-            tmp := edit.Convert(str, f, true, &t, len)
+            tmp := edit.Convert(str, f, &t, len)
             if ts && (afterLen := StrLen(tmp)) != len
                 return STitle("字数不正确,已跳过 " len "/" afterLen, false)
         }
@@ -1962,7 +1935,7 @@ MoreGui(tab := 1)
     if ini.noEditMode
         mg.AddButton("yp", "在编辑器中打开", "打开编辑器编辑`n产生的修改也有效 需手动刷新").OnEvent("Click", (*) => (FileExist(data.path) ? (WinExist(data.title) ? WinActivate(data.title) : RunEditor(data.path)) : " "))
 
-    mg.AddText("xs", "标题计数只是加载列表与重命名无关,开始计数即可点击重命名, 选中表示跳过此项重命名`n按F2可简单编辑,完成其他动作后编辑,防止被恢复, 右键某行更多操作 (Ctrl或Shift点击选择多行右键选中)")
+    mg.AddText("xs", "标题计数只是加载列表与重命名无关,开始计数即可点击重命名, 选中表示跳过此项重命名`n完全加载可按F2简单编辑, 右键某行更多操作 (Ctrl或Shift点击选择多行右键选中)")
 
     mg.SetFont("", "Arial")
     lvArr := ["原路径", "新路径", "差异", "距离", "文件夹", "目录", "选中", "#"]
@@ -2036,23 +2009,24 @@ MoreGui(tab := 1)
     mg.AddButton("yp", "前").OnEvent("Click", (*) => ActionAdd("插入前", acInsert.Value))
     mg.AddButton("yp", "后").OnEvent("Click", (*) => ActionAdd("插入后", acInsert.Value))
 
-    acExp := AddExp("w600", "w300", "为空则无条件`n不为空时会在添加动作的时候自动追加条件`n只有在满足条件的情况才会执行此动作`n不包括 排除 及非C#的转换 D", false)
+    acExp := AddExp("w600", "w300", "为空则无条件`n不为空时会在添加动作的时候自动追加条件`n只有在满足条件的情况才会执行此动作`n不包括 排除", false)
     mg.AddButton("yp x+218", "全局", "添加整个流程的全局条件,多项则需同时满足").OnEvent("Click", (*) => ActionAddExp())
 
     mg.AddText()
-    acMove := mg.AddTextEdit("移动", "xs Section x" acExp.x, "x73 w327 ReadOnly", , , "移到符合条件的文件到指定文件夹`n为防出错,不能手动设置,需拖拽文件夹到此页面`n在开始重命名时移动,能恢复`n必需设置条件或包含全局条,用于整理")
+    acMove := mg.AddTextEdit("移动", "xs Section x" acExp.x, "x73 w327 ReadOnly", , , "移到符合条件的文件到指定文件夹`n为防出错,不能手动设置,需拖拽文件夹到此页面`n在开始重命名时移动,能恢复`n必需设置条件或包含全局条件,用于整理")
     mg.AddButton("yp", "+").OnEvent("Click", (*) => ActionAddIO("移动", acMove.Value))
-    mg.AddButton("yp x+140", "删除", "删除符合条件的文件到回收站`n在执行动作过程中直接删除,需手动进回收站恢复`n必需设置条件或包含全局条件,用于整理").OnEvent("Click", (*) => ActionAddIO("删除", " "))
+    mg.AddButton("yp x+45", "删除", "删除符合条件的文件到回收站`n在执行动作过程中直接删除,需手动进回收站恢复`n必需设置条件或包含全局条件,用于整理").OnEvent("Click", (*) => ActionAddIO("删除", " "))
+    mg.AddButton("yp x+45", "删除并填充", "删除文件到回收站,并填充0大小文件占位,恢复同左`n某些下载工具用路径判断重复,删除并占位防止再次下载").OnEvent("Click", (*) => ActionAdd("删除并填充", " "))
 
     g.mg.acAll := acAll := mg.AddDropDownListEx("动作", acArr, "xs", " x73 w405", ini.actionChoose <= acArr.Length ? ini.actionChoose : 1, , "所有动作`n设置不同的名称并保存新增")
     acAll.OnEvent("change", (ctrl, info) => acEdit.Value := action.Read(acName.Value := ctrl.Text))
-    mg.AddButton("yp", "保存", "保存或新增规则").OnEvent("Click", ActionSave)
+    mg.AddButton("yp", "执行", "在当前文件中执行动作 (不保存)").OnEvent("Click", (*) => action.Exec("临时动作", acEdit.Text))
+    mg.AddButton("yp", "+", "保存或新增规则").OnEvent("Click", ActionSave)
     mg.AddButton("yp", "-", "删除动作").OnEvent("Click", (*) => action.Delete(acAll.Text))
-    mg.AddButton("yp", "保存并替换", "保存并直接在当前文件中执行当前动作").OnEvent("Click", (*) => ActionSave("替"))
+    ; mg.AddButton("yp", "保存并执行", "保存并直接在当前文件中执行当前动作").OnEvent("Click", (*) => ActionSave("执"))
     g.mg.acEdit := acEdit := mg.AddEdit("xs r19 w600", acAll.Text ? action.Read(acAll.Text) : "", , "
     (
         动作流程,按行依次执行
-        点击 存 保存或新增规则
         尽量不要手动添加
         可调整行顺序(执行顺序)
         添加错误时可删除指定行
@@ -2066,7 +2040,7 @@ MoreGui(tab := 1)
     g.mg.tab.UseTab(4)
     AddCheckboxEx("exit", "Section", "完成后退出", "仅在外部传入参数及成功命名部分文件后退出`n直接运行程序不会退出")
     AddCheckboxEx("gui", "yp x200", "修改时显示界面", "关闭后通过直接运行程序或者托盘菜单启动界面").GetPos(&x)
-    AddCheckboxEx("noEditMode", "yp x400", "无需编辑器模式", "下次重命名不使用编辑器直接启动本界面`n在完全加载的情况下可按F2手动重命名`n适用于不太频繁在编辑器中编辑的用户`n需手动点击 列表-重命名 开始重命名")
+    AddCheckboxEx("noEditMode", "yp x400", "无需编辑器模式", "下次重命名不使用编辑器直接启动列表界面`n需手动点击 列表-重命名 开始重命名")
     mg.AddButton("yp x600", "编辑器", "选择默认编辑器`n需编辑器标题能显示文件名").OnEvent("Click", (*) => ChooseEditor())
 
     AddCheckboxEx("muiltTab", "xs", "多标签编辑器", "多标签编辑器切换标签立即进行重命名")
@@ -2102,15 +2076,21 @@ MoreGui(tab := 1)
 
     g.mg.tab.UseTab(5)
     mg.AddText("Section")
-    etcClassify := mg.AddComboBoxEx("分类", ini.classify, , "x73 w250", , , "提取文件名指定的部分(正则中的$1)`n在文件所在位置新建以此命名的文件夹并移动到此`n通过主界面排除指定属性的文件`n示例`n正则: (\[.+?\])`n路径: D:\test\123 [作者] 666`n结果: D:\test\[作者]\123 [作者] 666")
+    etcClassify := mg.AddComboBoxEx("分类", ini.classify, , "x73 w250", , , "示例`n正则: (\[.+?\])`n路径: D:\test\123 [作者] 666`n结果: D:\test\[作者]\123 [作者] 666")
     etcClassifyOnlyReplace := mg.AddCheckbox("yp", "替换提取的部分", , "启用示例结果: D:\test\[作者]\123  666")
-    mg.AddButton("yp", "开始分类").OnEvent("Click", (*) => OtherFunc("分类"))
+    mg.AddButton("yp", "开始分类", "提取文件名指定的部分(正则中的$1)`n在文件所在位置新建以此命名的文件夹并移动到此`n通过主界面排除指定属性的文件").OnEvent("Click", (*) => OtherFunc("分类"))
 
     mg.AddText()
     mg.AddText("xs", "补零")
-    etcAdd0 := mg.AddEditUpDown("位数", "yp x73", "Number w50", "Range2-9", 2, , "某些软件不支持自然语言排序,在数字前增加0便于排序`n位置为空则为第一个出现的数字`n示例: 3`n路径: 你 1 好呀 3.txt`n结果: 你 001 好呀 3.txt ")
+    etcAdd0 := mg.AddEditUpDown("位数", "yp x73", "Number w50", "Range2-9", 2, , "位数为空则为第一个出现的数字`n示例: 3`n路径: 你 1 好呀 3.txt`n结果: 你 001 好呀 3.txt ")
     etcAdd0Text := mg.AddTextEdit("位置", "yp", "w260", , , "为在此字符串之后出现的第一个数字补全`n示例: 好`n结果: 你 1 好呀 003.txt")
-    mg.AddButton("yp x+60", "开始补零").OnEvent("Click", (*) => OtherFunc("补零"))
+    mg.AddButton("yp x+60", "开始补零", "某些软件不支持自然语言排序,在数字前增加0便于排序").OnEvent("Click", (*) => OtherFunc("补零"))
+
+    mg.AddText()
+    mg.AddText("xs", "去重")
+    etcFilterDelimiters := mg.AddTextEdit("分割符", "yp x73", "w100", " ", , "默认以空格划分`n示例 (空格)`n文件名: jk #jk jk 123.jpeg`n结果: jk #jk 123.jpeg")
+    etcFilterEx := mg.AddTextEdit("特殊字符", "yp", "w100", , , "一些首尾字符不参与比较(包含的会被保留)`n示例 (空格)`n特殊字符: #`n文件名: jk #jk jk# 123.jpeg`n结果: #jk jk# 123.jpeg")
+    mg.AddButton("yp x+132", "开始去重", "用分割符分割文件名,去除重复部分然后组合").OnEvent("Click", (*) => OtherFunc("去重"))
 
     mg.AddText("xs")
     mg.AddButton(, "以TXT文件第一行为文件名", "找到首个不为空的行作为文件名`n如果此行字数超过200则跳过此文件`n可能有编码问题,注意预览").OnEvent("Click", (*) => OtherFunc("检索TXT"))
@@ -2146,8 +2126,11 @@ MoreGui(tab := 1)
         {
             count := dirCount := failure := 0
             dirMap := Map()
+            pos := 0
             for i in FileArray
             {
+                if newPos := PosTitle(&pos, A_Index, FileArray, 5)
+                    mfText.Value := "合并进度:" newPos
                 if !DirExist(i)
                     continue
                 dirCount++
@@ -2174,6 +2157,7 @@ MoreGui(tab := 1)
                     }
                 }
             }
+
             if count
             {
                 for i in dirMap
@@ -2218,6 +2202,13 @@ MoreGui(tab := 1)
             catch
                 return MGTtitle("正则错误")
         }
+        else if t = "去重"
+        {
+            if !StrLen(etcFilterDelimiters.Text)
+                return MGTtitle("分割符为空")
+            filterEx := StrLen(etcFilterEx.Text)
+        }
+
         isRun := true
         tmp := ""
         pos := count := 0
@@ -2256,9 +2247,54 @@ MoreGui(tab := 1)
                             }
                         }
                     }
+                case "去重":
+                    m := Map()
+                    exM := Map()
+                    r := ""
+                    arr := []
+                    hasEx := false
+                    for k in StrSplit(i.nameNoExt, etcFilterDelimiters.Text)
+                    {
+                        if m.Has(k) || (filterEx && m.Has(etcFilterEx.Text k))
+                            continue
+                        m.Set(k, true)
+                        arr.Push(k)
+                        if filterEx
+                        {
+                            pos := InStr(k, etcFilterEx.Text)
+                            if pos = 1 || pos = StrLen(k)
+                                exM.Set(Trim(k, etcFilterEx.Text), true)
+                        }
+                    }
+
+                    if exM.Count
+                    {
+                        while true
+                        {
+                            match := false
+                            for k in arr
+                            {
+                                if exM.Has(k)
+                                {
+                                    match := true
+                                    arr.RemoveAt(A_Index)
+                                    break
+                                }
+                            }
+                            if !match
+                                break
+                        }
+                    }
+                    r := ""
+                    for k in arr
+                        r .= k (A_Index < arr.Length ? etcFilterDelimiters.Text : "")
+
+                    if r && r != i.nameNoExt
+                        i.nameNoExt := r, count++
             }
             tmp .= i.ToTmp(A_Index)
         }
+
         if count
             FileWrite(tmp, data.path)
         else
@@ -2327,6 +2363,7 @@ MoreGui(tab := 1)
                 btnTest()
             }
         }
+        return tmp
 
         AppendExp(*)
         {
@@ -2345,13 +2382,11 @@ MoreGui(tab := 1)
                 if !InStr(a[a.Length], ";>>>exp<>")
                     return MGTtitle("未设置起始条件")
 
-                o.Value .= str
-                acEdit.Value .= str, tmp.text.Value := ""
+                o.Value .= str, tmp.text.Value := ""
             }
             else
                 o.Value .= str, RuleTest(rePath)
         }
-        return tmp
     }
 
     TabChange(ctrl, info)
@@ -2431,7 +2466,12 @@ MoreGui(tab := 1)
     LVGetPath(row, souce := true, &index := 0)
     {
         index := g.mg.LV.GetText(row, lvArr.Length)
-        return souce ? data.currentSp[index].souce : data.currentSp[index].out
+        dir := g.mg.LV.GetText(row, 5)
+        s := g.mg.LV.GetText(row, 1)
+        o := g.mg.LV.GetText(row, 2)
+        s := InStr(s, ":\") ? s : dir "\" s
+        o := o ? (InStr(o, ":\") ? o : dir "\" o) : s
+        return souce ? s : o
     }
 
     ;手动编辑
@@ -2599,16 +2639,13 @@ MoreGui(tab := 1)
                 pos := 0
                 for i in data.currentSp
                 {
-                    if !g.mg
-                        return
-
-                    if !g.wait || cancel
+                    if !g.mg || !g.wait || cancel
                         return
 
                     if newPos := PosTitle(&pos, A_Index, data.currentSp)
                         MGTtitle((ini.previewFull ? "加载中..." : "刷新中... ") newPos, false)
 
-                    if pathBase.Batch(i, arr2[A_Index], i.attrib) = -1 && !ini.previewFull
+                    if i.Batch(arr2[A_Index]) = -1 && !ini.previewFull
                         continue
 
                     if IsChange := i.IsChange
@@ -2645,7 +2682,6 @@ MoreGui(tab := 1)
                     }
                 }
             }
-
 
             if !ini.previewFull && (s > 0)
             {
@@ -2749,15 +2785,15 @@ MoreGui(tab := 1)
         f.Write(Trim(acEdit.Value, "`n"))
         f.Close()
 
-        if ctrl = "替"
-        {
-            if data.inEdit
-                action.Exec(nameSafe), MGTtitle("保存并替换")
-            else
-                MGTtitle("未在编辑状态")
-        }
-        else
-            MGTtitle("保存完成")
+        ; if ctrl = "执"
+        ; {
+        ;     if data.inEdit
+        ;         action.Exec(nameSafe), MGTtitle("保存并执行")
+        ;     else
+        ;         MGTtitle("未在编辑状态")
+        ; }
+        ; else
+        MGTtitle("保存完成")
 
         for i in acArr
             if nameSafe = i
@@ -2857,8 +2893,19 @@ MoreGui(tab := 1)
                     acEdit.Value .= reRule.Value
                 g.mg.tab.Value := 3
             case "直接替换":
-                g.ex.reSave.Text := reRule.Value
-                g.ex.Change.Call("re")
+                if StrLen(reExp.text.Value)
+                {
+                    if !InStr(reRule.Value, ";>>>exp<>")
+                        RuleGenerate()
+                    tmpAc := ";替换;"
+                    tmpAc .= StrReplace(reRule.Value, ";>>>exp<>", ";;>>>exp<>")
+                    action.Exec("临时动作", tmpAc)
+                }
+                else
+                {
+                    g.ex.reSave.Text := reRule.Value
+                    g.ex.Change.Call("re")
+                }
         }
     }
 
@@ -2920,7 +2967,7 @@ MoreGui(tab := 1)
             if !i
                 continue
 
-            sp := pathBase(i, DirExist(i), Get(i, "attrib", ""))
+            sp := pathBase(i, DirExist(i), FileGetProperty(i, "attrib", ""))
             arr := StrSplit(reRule.Value, ";")
 
             if arr[6]
@@ -2986,7 +3033,7 @@ RunEditorWait(path, bool := false, rename := true)
     else
     {
 
-        time := Get(path, "time")
+        time := FileGetProperty(path, "time")
         title := RunEditor(path)
         if hwnd := WinWait(title, , 3)
         {
@@ -3010,7 +3057,7 @@ RunEditorWait(path, bool := false, rename := true)
             }
 
             try
-                if bool || !g.wait || Get(path, "time") != time
+                if bool || !g.wait || FileGetProperty(path, "time") != time
                     return true
             catch
                 return false
@@ -3056,7 +3103,7 @@ BeginRename(list)
             if newPos := PosTitle(&pos, A_Index, data.currentSp)
                 MTitle(newPos)
 
-            if pathBase.Batch(i, arr2[index], i.attrib) = -1
+            if i.Batch(arr2[index]) = -1
                 continue
 
             if data.continueMap.Has(i.souce)
@@ -3064,15 +3111,19 @@ BeginRename(list)
 
             successSave := success
             i.Move(&success, &failure)
+
             if i.isDir && success > successSave
             {
                 for k in data.currentSp
                 {
                     if A_Index <= index
                         continue
+
                     if !InStr(k.out, i.souce)
                         break
+
                     k.out := StrReplace(k.out, i.souce, i.out)
+                    k.souce := StrReplace(k.souce, i.souce, i.out)
                 }
             }
         }
@@ -3119,9 +3170,9 @@ SplitPathEx(Path, &name := "", &dir := "", &ext := "", &nameNoExt := "", isDir :
 
 IsLastLine(index) => index = data.length ? "" : "`n"
 
-PosTitle(&pos, index, arr)
+PosTitle(&pos, index, arr, compare := 100)
 {
-    if index > pos + 100
+    if index > pos + compare
         return arr.Length - (pos := index) "/" arr.Length
 }
 
